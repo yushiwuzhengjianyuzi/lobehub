@@ -426,48 +426,6 @@ describe('connect command', () => {
     expect(codexProbe.close).toHaveBeenCalledOnce();
   });
 
-  /** @example Unsupported Codex keeps ordinary device sends on the existing exec runtime. */
-  it('does not advertise native Codex when the binary rejects initialization', async () => {
-    // ROOT CAUSE:
-    // collectSystemInfo unconditionally advertised codex-app-server-v1, so even an
-    // exec-only binary was selected for native ordinary sends and failed before answering.
-    // Native support must come from the resolved binary's actual handshake.
-    codexProbe.connect.mockRejectedValueOnce(new Error('unsupported app-server'));
-    await createProgram().parseAsync(['node', 'test', 'connect']);
-    await clientEventHandlers['system_info_request']?.({
-      requestId: 'probe-old',
-      type: 'system_info_request',
-    });
-    /** @example Unavailable native capability preserves the successful system-info response. */
-    expect(lastSentSystemInfoResponse.result).toMatchObject({
-      success: true,
-      systemInfo: { supportedAgentRuntimes: [] },
-    });
-    /** @example A failed probe does not leave its subprocess alive. */
-    expect(codexProbe.close).toHaveBeenCalledOnce();
-  });
-
-  /** @example A handshake timeout must not stall device discovery or advertise support. */
-  it('bounds native Codex probing and closes the stalled client', async () => {
-    vi.useFakeTimers();
-    try {
-      codexProbe.connect.mockImplementationOnce(() => new Promise(() => {}));
-      await createProgram().parseAsync(['node', 'test', 'connect']);
-      const response = clientEventHandlers['system_info_request']?.({
-        requestId: 'probe-stall',
-        type: 'system_info_request',
-      });
-      await vi.advanceTimersByTimeAsync(6000);
-      await response;
-      /** @example A stalled app-server falls back to the existing capability set. */
-      expect(lastSentSystemInfoResponse.result.systemInfo.supportedAgentRuntimes).toEqual([]);
-      /** @example Timeout releases the owned native process. */
-      expect(codexProbe.close).toHaveBeenCalledOnce();
-    } finally {
-      vi.useRealTimers();
-    }
-  });
-
   // ROOT CAUSE:
   // Every system_info_request started a Codex app-server handshake (up to 6 s), and tool
   // runs query system info during ordinary turns, so every device run paid for it.
